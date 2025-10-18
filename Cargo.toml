@@ -19,3 +19,5 @@ rmcp = { version = "0.8.1", features = ["schemars", "auth"] }
 # Patch for Windows cross-compilation issue with crunchy
 [patch.crates-io]
 crunchy = { git = "https://github.com/nmathewson/crunchy", branch = "cross-compilation-fix" }
+# Patch rmcp with token update callback support
+rmcp = { path = "/Users/ian/rmcp-upstream/crates/rmcp" }

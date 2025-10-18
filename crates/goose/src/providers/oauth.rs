@@ -19,7 +19,7 @@ struct OidcEndpoints {
     token_endpoint: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct TokenData {
     /// The access token used to authenticate API requests
     access_token: String,
@@ -576,6 +576,203 @@ mod tests {
             Some("invalid-format-refresh".to_string())
         );
         assert!(token_data.expires_at.is_none()); // Should be None due to parse error
+
+        Ok(())
+    }
+
+    /// Test successful refresh token exchange
+    #[tokio::test]
+    async fn test_refresh_token_success() -> Result<()> {
+        let mock_server = MockServer::start().await;
+
+        // Mock OIDC configuration endpoint
+        let oidc_response = serde_json::json!({
+            "authorization_endpoint": format!("{}/oauth2/authorize", mock_server.uri()),
+            "token_endpoint": format!("{}/oauth2/token", mock_server.uri())
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/oidc/.well-known/oauth-authorization-server"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&oidc_response))
+            .mount(&mock_server)
+            .await;
+
+        // Mock successful token refresh response
+        let refresh_response = serde_json::json!({
+            "access_token": "new-access-token",
+            "refresh_token": "new-refresh-token",
+            "expires_in": 3600
+        });
+
+        Mock::given(method("POST"))
+            .and(path("/oauth2/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&refresh_response))
+            .mount(&mock_server)
+            .await;
+
+        // Test the refresh flow
+        let endpoints = get_workspace_endpoints(&mock_server.uri()).await?;
+        let flow = OAuthFlow::new(
+            endpoints,
+            "test-client".to_string(),
+            "http://localhost".to_string(),
+            vec!["test-scope".to_string()],
+        );
+
+        let new_token = flow.refresh_token("valid-refresh-token").await?;
+
+        assert_eq!(new_token.access_token, "new-access-token");
+        assert_eq!(new_token.refresh_token, Some("new-refresh-token".to_string()));
+        assert!(new_token.expires_at.is_some());
+
+        Ok(())
+    }
+
+    /// Test refresh token failure handling
+    #[tokio::test]
+    async fn test_refresh_token_failure() -> Result<()> {
+        let mock_server = MockServer::start().await;
+
+        // Mock OIDC configuration endpoint
+        let oidc_response = serde_json::json!({
+            "authorization_endpoint": format!("{}/oauth2/authorize", mock_server.uri()),
+            "token_endpoint": format!("{}/oauth2/token", mock_server.uri())
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/oidc/.well-known/oauth-authorization-server"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&oidc_response))
+            .mount(&mock_server)
+            .await;
+
+        // Mock failed token refresh response
+        let error_response = serde_json::json!({
+            "error": "invalid_grant",
+            "error_description": "Refresh token is invalid or expired"
+        });
+
+        Mock::given(method("POST"))
+            .and(path("/oauth2/token"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(&error_response))
+            .mount(&mock_server)
+            .await;
+
+        // Test the refresh flow with failure
+        let endpoints = get_workspace_endpoints(&mock_server.uri()).await?;
+        let flow = OAuthFlow::new(
+            endpoints,
+            "test-client".to_string(),
+            "http://localhost".to_string(),
+            vec!["test-scope".to_string()],
+        );
+
+        let result = flow.refresh_token("invalid-refresh-token").await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Failed to refresh token"));
+
+        Ok(())
+    }
+
+    /// Test refresh token rotation
+    #[tokio::test]
+    async fn test_refresh_token_rotation() -> Result<()> {
+        let mock_server = MockServer::start().await;
+
+        // Mock OIDC configuration endpoint
+        let oidc_response = serde_json::json!({
+            "authorization_endpoint": format!("{}/oauth2/authorize", mock_server.uri()),
+            "token_endpoint": format!("{}/oauth2/token", mock_server.uri())
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/oidc/.well-known/oauth-authorization-server"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&oidc_response))
+            .mount(&mock_server)
+            .await;
+
+        // Mock token refresh response with rotated refresh token
+        let refresh_response = serde_json::json!({
+            "access_token": "new-access-token",
+            "refresh_token": "rotated-refresh-token",
+            "expires_in": 3600
+        });
+
+        Mock::given(method("POST"))
+            .and(path("/oauth2/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&refresh_response))
+            .mount(&mock_server)
+            .await;
+
+        // Test the refresh flow with token rotation
+        let endpoints = get_workspace_endpoints(&mock_server.uri()).await?;
+        let flow = OAuthFlow::new(
+            endpoints,
+            "test-client".to_string(),
+            "http://localhost".to_string(),
+            vec!["test-scope".to_string()],
+        );
+
+        let new_token = flow.refresh_token("old-refresh-token").await?;
+
+        assert_eq!(new_token.access_token, "new-access-token");
+        assert_eq!(new_token.refresh_token, Some("rotated-refresh-token".to_string()));
+
+        Ok(())
+    }
+
+    /// Test refresh token without rotation (RFC 6749 compliance)
+    #[test]
+    fn test_refresh_token_no_rotation() -> Result<()> {
+        let endpoints = OidcEndpoints {
+            authorization_endpoint: "https://example.com/oauth2/authorize".to_string(),
+            token_endpoint: "https://example.com/oauth2/token".to_string(),
+        };
+
+        let flow = OAuthFlow::new(
+            endpoints,
+            "test-client".to_string(),
+            "http://localhost".to_string(),
+            vec!["all-apis".to_string()],
+        );
+
+        // Mock token refresh response without new refresh token (RFC 6749 compliant)
+        let refresh_response = serde_json::json!({
+            "access_token": "new-access-token",
+            "expires_in": 3600
+        });
+
+        let token_data = flow.extract_token_data(&refresh_response, Some("old-refresh-token"))?;
+
+        assert_eq!(token_data.access_token, "new-access-token");
+        assert_eq!(token_data.refresh_token, Some("old-refresh-token".to_string()));
+
+        Ok(())
+    }
+
+    /// Enhanced token cache test with expired token
+    #[test]
+    fn test_token_cache_with_expired_token() -> Result<()> {
+        let cache = TokenCache::new(
+            "https://example.com",
+            "test-client-expired",
+            &["scope1".to_string()],
+        );
+
+        // Test with expired access token but valid refresh token
+        let expired_token = TokenData {
+            access_token: "expired-access-token".to_string(),
+            refresh_token: Some("valid-refresh-token".to_string()),
+            expires_at: Some(Utc::now() - chrono::Duration::hours(1)), // Expired 1 hour ago
+        };
+
+        cache.save_token(&expired_token)?;
+
+        let loaded_token = cache.load_token().unwrap();
+        assert_eq!(loaded_token.access_token, expired_token.access_token);
+        assert_eq!(loaded_token.refresh_token, expired_token.refresh_token);
+        // Should still load even though expired, so we can attempt refresh
+        assert!(loaded_token.expires_at.is_some());
 
         Ok(())
     }
