@@ -2,7 +2,7 @@ name: Build Patched
 on:
   push:
     branches:
-      - ian/release-goose-patched
+      - ian/release-patched-goose
   pull_request:
 
 jobs:
