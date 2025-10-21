@@ -5477,6 +5477,7 @@ dependencies = [
 [[package]]
 name = "rmcp"
 version = "0.8.1"
+source = "git+https://github.com/ianschenck/rust-sdk?branch=ian%2Frefresh-token-callback#fa0777719c5b715409d3e24083c9292679425b2c"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -5503,6 +5504,7 @@ dependencies = [
 [[package]]
 name = "rmcp-macros"
 version = "0.8.1"
+source = "git+https://github.com/ianschenck/rust-sdk?branch=ian%2Frefresh-token-callback#fa0777719c5b715409d3e24083c9292679425b2c"
 dependencies = [
  "darling 0.21.0",
  "proc-macro2",
