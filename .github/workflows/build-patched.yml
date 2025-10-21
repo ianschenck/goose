@@ -27,10 +27,15 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         
+      - name: Install system dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+          
       - name: Install cross-compilation tools (Ubuntu ARM)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
-          sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
           
       - name: Add target
@@ -43,6 +48,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: goose-${{ matrix.target }}
-          path: |
-            target/${{ matrix.target }}/release/goose
-            target/${{ matrix.target }}/release/goose.exe
+          path: target/${{ matrix.target }}/release/goose
